@@ -3,7 +3,7 @@ import { supabase } from "./lib/supabase";
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
 
-const THREAD_ID = "default";
+const THREAD_ID = new URLSearchParams(window.location.search).get("client") || "jordan-blake";
 
 const CLIENT = {
   name: "Jordan Blake", avatar: "JB", goal: "Fat Loss", phase: "Cut",
@@ -120,6 +120,7 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const [logModal, setLogModal] = useState(false);
   const [logEntry, setLogEntry] = useState({ weight: "", bodyFat: "" });
+  const [clientData, setClientData] = useState(CLIENT);
   const [foodPhotos, setFoodPhotos] = useState([]);
   const [photoUploading, setPhotoUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -128,9 +129,42 @@ export default function App() {
   const progressFileInputRef = useRef(null);
   const [selectedProgressAngle, setSelectedProgressAngle] = useState(null);
 
-  const accent = CLIENT.accent;
+  const accent = clientData.accent;
   const todaySession = sessions.find(s => s.status === "today");
   const todayIdx = sessions.findIndex(s => s.status === "today");
+
+  // ── Fetch client profile from Supabase ────────────────────────────────────
+  useEffect(() => {
+    supabase
+      .from("clients")
+      .select("*")
+      .eq("thread_id", THREAD_ID)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setClientData({
+            ...CLIENT,
+            name: data.name,
+            avatar: data.avatar,
+            goal: data.goal,
+            phase: data.phase,
+            accent: data.accent_color || CLIENT.accent,
+            watch: data.watch || clientData.watch,
+            connected: data.connected ?? clientData.connected,
+            weight: data.weight ?? CLIENT.weight,
+            startWeight: data.start_weight ?? clientData.startWeight,
+            targetWeight: data.target_weight ?? clientData.targetWeight,
+            bodyFat: data.body_fat ?? clientData.bodyFat,
+            startBodyFat: data.start_body_fat ?? clientData.startBodyFat,
+            targetBodyFat: data.target_body_fat ?? clientData.targetBodyFat,
+            weekNum: data.week_num ?? clientData.weekNum,
+            totalWeeks: data.total_weeks ?? clientData.totalWeeks,
+            compliance: data.compliance ?? clientData.compliance,
+            streak: data.streak ?? clientData.streak,
+          });
+        }
+      });
+  }, []);
 
   // ── Live watch tick ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -241,11 +275,11 @@ export default function App() {
   }
 
   const liveStats = {
-    calories: CLIENT.stats.calories + Math.floor(Math.sin(tick * 0.7) * 45),
-    protein: CLIENT.stats.protein + Math.floor(Math.sin(tick * 0.5) * 3),
-    steps: CLIENT.stats.steps + Math.floor(tick * 12),
-    sleep: CLIENT.stats.sleep,
-    water: CLIENT.stats.water,
+    calories: clientData.stats.calories + Math.floor(Math.sin(tick * 0.7) * 45),
+    protein: clientData.stats.protein + Math.floor(Math.sin(tick * 0.5) * 3),
+    steps: clientData.stats.steps + Math.floor(tick * 12),
+    sleep: clientData.stats.sleep,
+    water: clientData.stats.water,
   };
 
   function notify(msg, type = "success") {
@@ -277,7 +311,7 @@ export default function App() {
           session_day: session.day,
           exercise_name: exercise.name,
           done: newDone,
-          week_number: CLIENT.weekNum,
+          week_number: clientData.weekNum,
           logged_at: new Date().toISOString(),
         },
         { onConflict: "thread_id,session_day,exercise_name,week_number" }
@@ -544,10 +578,10 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 500, letterSpacing: 0.3 }}>
-                WEEK {CLIENT.weekNum} OF {CLIENT.totalWeeks} · {CLIENT.phase.toUpperCase()}
+                WEEK {clientData.weekNum} OF {clientData.totalWeeks} · {clientData.phase.toUpperCase()}
               </div>
               <div style={{ fontSize: 26, fontWeight: 800, color: "#fff", marginTop: 2, letterSpacing: -0.5 }}>
-                Good morning,<br />Jordan 👋
+                Good morning,<br />{clientData.name.split(' ')[0]} 👋
               </div>
             </div>
             <div style={{
@@ -555,17 +589,17 @@ export default function App() {
               background: `${accent}22`, border: `1.5px solid ${accent}55`,
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 15, fontWeight: 800, color: accent,
-            }}>JB</div>
+            }}>{clientData.avatar}</div>
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, padding: "14px 20px 4px", flexWrap: "wrap" }}>
           <span style={S.pill(`${accent}22`)}>
             <span style={{ color: accent, marginRight: 4 }}>🔥</span>
-            <span style={{ color: accent }}>{CLIENT.streak} day streak</span>
+            <span style={{ color: accent }}>{clientData.streak} day streak</span>
           </span>
           <span style={S.pill("rgba(0,200,150,0.15)")}>
-            <span style={{ color: "#00C896" }}>✓ {CLIENT.compliance}% compliance</span>
+            <span style={{ color: "#00C896" }}>✓ {clientData.compliance}% compliance</span>
           </span>
           <span style={S.pill()}>
             <span style={{ color: "rgba(255,255,255,0.6)" }}>{weekDone}/7 done</span>
@@ -641,10 +675,10 @@ export default function App() {
           </div>
         )}
 
-        {CLIENT.connected && (
+        {clientData.connected && (
           <div style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Live from {CLIENT.watch}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Live from {clientData.watch}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <div style={{
                   width: 6, height: 6, borderRadius: "50%", background: "#00C896",
@@ -660,7 +694,7 @@ export default function App() {
                 { label: "Steps", value: liveStats.steps.toLocaleString(), unit: "", icon: "👟" },
                 { label: "Sleep", value: liveStats.sleep, unit: "h", icon: "😴" },
                 { label: "Water", value: liveStats.water, unit: "L", icon: "💧" },
-                { label: "Goal", value: CLIENT.goal, unit: "", icon: "🎯" },
+                { label: "Goal", value: clientData.goal, unit: "", icon: "🎯" },
               ].map((s, i) => (
                 <div key={i} style={{
                   background: "rgba(255,255,255,0.04)", borderRadius: 12,
@@ -751,7 +785,7 @@ export default function App() {
             "{noteFromCoach}"
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 8 }}>
-            — {CLIENT.coach}
+            — {clientData.coach}
           </div>
         </div>
       </>
@@ -766,7 +800,7 @@ export default function App() {
       <>
         <div style={S.header}>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
-            Week {CLIENT.weekNum}
+            Week {clientData.weekNum}
           </div>
           <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Schedule</div>
         </div>
@@ -883,10 +917,10 @@ export default function App() {
   }
 
   function ProgressView() {
-    const weightLost = CLIENT.startWeight - CLIENT.weight;
-    const weightLeft = CLIENT.weight - CLIENT.targetWeight;
-    const overallPct = Math.round(((CLIENT.startWeight - CLIENT.weight) / (CLIENT.startWeight - CLIENT.targetWeight)) * 100);
-    const bfLost = CLIENT.startBodyFat - CLIENT.bodyFat;
+    const weightLost = clientData.startWeight - clientData.weight;
+    const weightLeft = clientData.weight - clientData.targetWeight;
+    const overallPct = Math.round(((clientData.startWeight - clientData.weight) / (clientData.startWeight - clientData.targetWeight)) * 100);
+    const bfLost = clientData.startBodyFat - clientData.bodyFat;
 
     const angles = [
       { key: "front", label: "Front" },
@@ -915,7 +949,7 @@ export default function App() {
 
         <div style={S.header}>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
-            Week {CLIENT.weekNum} of {CLIENT.totalWeeks}
+            Week {clientData.weekNum} of {clientData.totalWeeks}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 4 }}>My Progress</div>
@@ -1013,7 +1047,7 @@ export default function App() {
                 Current Weight
               </div>
               <div style={{ fontSize: 32, fontWeight: 900, color: "#fff" }}>
-                {CLIENT.weight}<span style={{ fontSize: 16, color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>kg</span>
+                {clientData.weight}<span style={{ fontSize: 16, color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>kg</span>
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
@@ -1022,10 +1056,10 @@ export default function App() {
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{weightLeft.toFixed(1)}kg to go</div>
             </div>
           </div>
-          <WeightChart history={CLIENT.weightHistory} accent={accent} />
+          <WeightChart history={clientData.weightHistory} accent={accent} />
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Start: {CLIENT.startWeight}kg</span>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Target: {CLIENT.targetWeight}kg</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Start: {clientData.startWeight}kg</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Target: {clientData.targetWeight}kg</span>
           </div>
         </div>
 
@@ -1036,7 +1070,7 @@ export default function App() {
           </div>
           <ProgressBar value={overallPct} max={100} color={accent} glow />
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 8 }}>
-            Week {CLIENT.weekNum} of {CLIENT.totalWeeks} · {CLIENT.goal} phase
+            Week {clientData.weekNum} of {clientData.totalWeeks} · {clientData.goal} phase
           </div>
         </div>
 
@@ -1044,12 +1078,12 @@ export default function App() {
           <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Body Fat %</div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
             <div>
-              <div style={{ fontSize: 28, fontWeight: 900, color: "#fff" }}>{CLIENT.bodyFat}%</div>
+              <div style={{ fontSize: 28, fontWeight: 900, color: "#fff" }}>{clientData.bodyFat}%</div>
               <div style={{ fontSize: 12, color: "#00C896", marginTop: 2 }}>−{bfLost.toFixed(1)}% from start</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Target</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: accent }}>{CLIENT.targetBodyFat}%</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: accent }}>{clientData.targetBodyFat}%</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 4 }}>
@@ -1074,7 +1108,7 @@ export default function App() {
         <div style={S.card}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Measurements (cm)</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {Object.entries(CLIENT.measurements).map(([k, v]) => (
+            {Object.entries(clientData.measurements).map(([k, v]) => (
               <div key={k} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "capitalize", letterSpacing: 0.5 }}>{k}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginTop: 2 }}>
@@ -1103,7 +1137,7 @@ export default function App() {
               fontSize: 14, fontWeight: 800, color: "#818CF8",
             }}>AR</div>
             <div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>{CLIENT.coach}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>{clientData.coach}</div>
               <div style={{ fontSize: 11, color: "#00C896", display: "flex", alignItems: "center", gap: 4 }}>
                 <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#00C896" }} />
                 Online
@@ -1132,7 +1166,7 @@ export default function App() {
                   <div style={{ fontSize: 14, color: "#fff", lineHeight: 1.5 }}>{m.text}</div>
                 </div>
                 <div style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 3 }}>
-                  {isCoach ? CLIENT.coach : "You"} · {m.time}
+                  {isCoach ? clientData.coach : "You"} · {m.time}
                 </div>
               </div>
             );
