@@ -128,6 +128,7 @@ export default function App() {
   const [progressUploading, setProgressUploading] = useState({ front: false, left: false, back: false, right: false });
   const progressFileInputRef = useRef(null);
   const [selectedProgressAngle, setSelectedProgressAngle] = useState(null);
+  const [invoices, setInvoices] = useState([]);
 
   const accent = clientData.accent;
   const todaySession = sessions.find(s => s.status === "today");
@@ -250,6 +251,26 @@ export default function App() {
       }
     }
     fetchFoodPhotos();
+  }, []);
+
+  // ── Invoices: fetch + real-time subscription ──────────────────────────────
+  useEffect(() => {
+    supabase
+      .from("invoices")
+      .select("*")
+      .eq("thread_id", THREAD_ID)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => { if (data) setInvoices(data); });
+
+    const channel = supabase
+      .channel("invoices-client-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "invoices", filter: `thread_id=eq.${THREAD_ID}` },
+        (payload) => setInvoices(prev => [payload.new, ...prev]))
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "invoices", filter: `thread_id=eq.${THREAD_ID}` },
+        (payload) => setInvoices(prev => prev.map(i => i.id === payload.new.id ? payload.new : i)))
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
   }, []);
 
   // Normalise DB row → UI shape
@@ -1273,11 +1294,93 @@ export default function App() {
     );
   }
 
+  function BillingView() {
+    const pending = invoices.filter(i => i.status === "pending");
+    const paid = invoices.filter(i => i.status === "paid");
+
+    return (
+      <>
+        <div style={S.header}>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#fff" }}>Billing</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+            {pending.length > 0
+              ? `${pending.length} invoice${pending.length > 1 ? "s" : ""} awaiting payment`
+              : paid.length > 0 ? "All paid — you're up to date 🎉" : "No invoices yet"}
+          </div>
+        </div>
+
+        <div style={{ padding: "8px 16px 40px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {invoices.length === 0 && (
+            <div style={{ ...S.card, textAlign: "center", padding: "48px 20px" }}>
+              <div style={{ fontSize: 40, opacity: 0.2, marginBottom: 10 }}>🧾</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)" }}>No invoices yet</div>
+            </div>
+          )}
+
+          {invoices.map(inv => (
+            <div key={inv.id} style={{
+              ...S.card,
+              border: inv.status === "paid"
+                ? "1px solid rgba(0,200,150,0.25)"
+                : inv.status === "pending"
+                ? `1px solid ${accent}44`
+                : "1px solid rgba(255,255,255,0.07)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", flex: 1, paddingRight: 12 }}>
+                  {inv.description}
+                </div>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 8,
+                  textTransform: "uppercase", letterSpacing: 0.5, flexShrink: 0,
+                  background: inv.status === "paid" ? "rgba(0,200,150,0.15)" : inv.status === "cancelled" ? "rgba(255,255,255,0.06)" : `${accent}20`,
+                  color: inv.status === "paid" ? "#00C896" : inv.status === "cancelled" ? "rgba(255,255,255,0.3)" : accent,
+                }}>
+                  {inv.status}
+                </div>
+              </div>
+
+              <div style={{ fontFamily: "Barlow Condensed, sans-serif", fontSize: 30, fontWeight: 900, color: inv.status === "paid" ? "#00C896" : accent, marginBottom: 6 }}>
+                ${(inv.amount_cents / 100).toFixed(2)}
+              </div>
+
+              <div style={{ display: "flex", gap: 16, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+                {inv.due_date && <span>Due {inv.due_date}</span>}
+                {inv.paid_at
+                  ? <span style={{ color: "#00C896" }}>Paid {new Date(inv.paid_at).toLocaleDateString()}</span>
+                  : <span>Sent {new Date(inv.created_at).toLocaleDateString()}</span>
+                }
+              </div>
+
+              {inv.status === "pending" && inv.stripe_payment_link_url && (
+                <a
+                  href={inv.stripe_payment_link_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "block", marginTop: 14,
+                    background: accent, borderRadius: 12, padding: "13px",
+                    textAlign: "center", color: "#fff", fontWeight: 800,
+                    fontSize: 14, fontFamily: "Barlow Condensed, sans-serif",
+                    letterSpacing: "0.06em", textTransform: "uppercase", textDecoration: "none",
+                  }}
+                >
+                  Pay Now — ${(inv.amount_cents / 100).toFixed(2)}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  }
+
   const tabs = [
     { id: "today", label: "Today", icon: "🏠" },
     { id: "week", label: "Week", icon: "📅" },
     { id: "progress", label: "Progress", icon: "📈" },
     { id: "coach", label: "Coach", icon: "💬" },
+    { id: "billing", label: "Billing", icon: "💳", badge: invoices.some(i => i.status === "pending") },
   ];
 
   return (
@@ -1354,11 +1457,12 @@ export default function App() {
           {view === "week" && <WeekView />}
           {view === "progress" && <ProgressView />}
           {view === "coach" && <CoachView />}
+          {view === "billing" && <BillingView />}
         </div>
 
         <div style={S.tabBar}>
           {tabs.map(t => (
-            <div key={t.id} style={S.tab(view === t.id)} onClick={() => {
+            <div key={t.id} style={{ ...S.tab(view === t.id), position: "relative" }} onClick={() => {
               setView(t.id);
               if (t.id === "week" && !activeDay) {
                 const todayDay = sessions.find(s => s.status === "today")?.day;
@@ -1369,6 +1473,9 @@ export default function App() {
               <span>{t.label}</span>
               {view === t.id && (
                 <div style={{ width: 4, height: 4, borderRadius: "50%", background: accent, marginTop: 1 }} />
+              )}
+              {t.badge && view !== t.id && (
+                <div style={{ position: "absolute", top: 2, right: "calc(50% - 16px)", width: 8, height: 8, borderRadius: "50%", background: accent, boxShadow: `0 0 6px ${accent}` }} />
               )}
             </div>
           ))}
