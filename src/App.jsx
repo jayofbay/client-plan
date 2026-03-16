@@ -799,125 +799,194 @@ export default function App() {
   }
 
   function WeekView() {
-    const statusColor = (s) => s === "done" ? "#00C896" : s === "today" ? accent : "rgba(255,255,255,0.2)";
-    const statusLabel = (s) => s === "done" ? "Done" : s === "today" ? "Today" : "Upcoming";
+    const statusColor = (s) => s === "done" ? "#00C896" : s === "today" ? accent : s === "missed" ? "#FF4D00" : "rgba(255,255,255,0.2)";
+    const statusLabel = (s) => s === "done" ? "Done" : s === "today" ? "Today" : s === "missed" ? "Missed" : "Upcoming";
+
+    const selectedSession = sessions.find(s => s.day === activeDay);
+    const selectedIdx = sessions.findIndex(s => s.day === activeDay);
+
+    // Default to today's session day on first render
+    const todayDay = sessions.find(s => s.status === "today")?.day;
 
     return (
       <>
+        {/* Header */}
         <div style={S.header}>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
-            Week {clientData.weekNum}
+            Week {clientData.weekNum} of {clientData.totalWeeks}
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Schedule</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 2 }}>Schedule</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>
+            {sessions.filter(s => s.status === "done").length} of {sessions.length} sessions done
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 6, padding: "12px 16px 4px", overflowX: "auto" }}>
-          {sessions.map((s, i) => (
-            <div key={i} onClick={() => setActiveDay(activeDay === s.day ? null : s.day)}
-              style={{ flexShrink: 0, width: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer" }}>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 700, letterSpacing: 0.5 }}>{s.day}</div>
-              <div style={{
-                width: 40, height: 40, borderRadius: 12,
-                background: activeDay === s.day ? typeColor(s.type) : "rgba(255,255,255,0.06)",
-                border: s.status === "today" ? `2px solid ${accent}` : "1.5px solid rgba(255,255,255,0.08)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 16, transition: "all 0.2s",
-              }}>
-                {s.type === "strength" ? "💪" : s.type === "cardio" ? "🏃" : "😴"}
-              </div>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor(s.status) }} />
-            </div>
-          ))}
-        </div>
-
-        {sessions.map((s, si) => {
-          const isActive = activeDay === s.day;
-          const doneCt = s.exercises.filter(e => e.done).length;
-          return (
-            <div key={si} onClick={() => setActiveDay(isActive ? null : s.day)}
-              style={{
-                ...S.card,
-                border: isActive ? `1px solid ${typeColor(s.type)}44` : "1px solid rgba(255,255,255,0.07)",
-                cursor: "pointer",
-              }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Calendar Grid */}
+        <div style={{ padding: "4px 16px 0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+            {sessions.map((s, i) => {
+              const isSelected = activeDay === s.day;
+              const isToday = s.status === "today";
+              const isDone = s.status === "done";
+              const isMissed = s.status === "missed";
+              const sColor = statusColor(s.status);
+              return (
+                <div key={i} onClick={() => setActiveDay(isSelected ? null : s.day)}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, cursor: "pointer" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: isSelected ? accent : "rgba(255,255,255,0.3)", textTransform: "uppercase" }}>
+                    {s.day}
+                  </div>
                   <div style={{
-                    width: 38, height: 38, borderRadius: 10,
-                    background: `${typeColor(s.type)}18`, border: `1px solid ${typeColor(s.type)}33`,
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                    width: "100%", aspectRatio: "1", borderRadius: 10,
+                    background: isSelected ? `${typeColor(s.type)}30` : isDone ? "rgba(0,200,150,0.08)" : isMissed ? "rgba(255,77,0,0.08)" : "rgba(255,255,255,0.05)",
+                    border: isSelected ? `2px solid ${accent}` : isToday ? `2px solid ${accent}66` : `1.5px solid ${isDone ? "#00C89640" : isMissed ? "#FF4D0040" : "rgba(255,255,255,0.08)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14, transition: "all 0.2s",
+                    boxShadow: isSelected ? `0 0 12px ${accent}33` : "none",
                   }}>
-                    {s.type === "strength" ? "💪" : s.type === "cardio" ? "🏃" : "😴"}
+                    {isDone ? "✓" : isMissed ? "✗" : s.type === "strength" ? "💪" : s.type === "cardio" ? "🏃" : "😴"}
                   </div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{s.day} · {s.label}</div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 1 }}>{typeLabel(s.type)}</div>
-                  </div>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? accent : sColor, transition: "all 0.2s" }} />
                 </div>
-                <span style={{ ...S.pill(), background: `${statusColor(s.status)}22`, color: statusColor(s.status), fontSize: 11 }}>
-                  {statusLabel(s.status)}
-                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Day Detail Panel */}
+        {selectedSession ? (
+          <div style={{ padding: "0 16px 16px", marginTop: 12 }}>
+            {/* Day header */}
+            <div style={{
+              background: `${typeColor(selectedSession.type)}10`,
+              border: `1px solid ${typeColor(selectedSession.type)}30`,
+              borderRadius: 16, padding: "14px 16px", marginBottom: 12,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: typeColor(selectedSession.type), marginBottom: 3 }}>
+                    {selectedSession.day} · {statusLabel(selectedSession.status)}
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{selectedSession.label}</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{typeLabel(selectedSession.type)}</div>
+                </div>
+                <div style={{
+                  width: 48, height: 48, borderRadius: 14,
+                  background: `${typeColor(selectedSession.type)}20`, border: `1px solid ${typeColor(selectedSession.type)}40`,
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+                }}>
+                  {selectedSession.type === "strength" ? "💪" : selectedSession.type === "cardio" ? "🏃" : "😴"}
+                </div>
               </div>
 
-              {isActive && s.exercises.length > 0 && (
-                <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
-                  {s.exercises.map((ex, ei) => (
-                    <div key={ei}
-                      onClick={e => { e.stopPropagation(); if (s.status === "today") toggleExercise(si, ei); }}
-                      style={{
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "8px 0",
-                        borderBottom: ei < s.exercises.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
-                        cursor: s.status === "today" ? "pointer" : "default",
-                      }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {s.status === "today" && (
-                          <div style={{
-                            width: 20, height: 20, borderRadius: 6,
-                            border: ex.done ? "none" : `1.5px solid rgba(255,255,255,0.2)`,
-                            background: ex.done ? accent : "transparent",
-                            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                          }}>
-                            {ex.done && <span style={{ fontSize: 10, color: "#fff" }}>✓</span>}
-                          </div>
-                        )}
-                        {s.status === "done" && (
-                          <div style={{
-                            width: 20, height: 20, borderRadius: 6,
-                            background: "rgba(0,200,150,0.2)",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>
-                            <span style={{ fontSize: 10, color: "#00C896" }}>✓</span>
-                          </div>
-                        )}
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: s.status === "done" ? "rgba(255,255,255,0.5)" : "#fff" }}>
-                            {ex.name}
-                          </div>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{ex.sets} · {ex.weight}</div>
-                        </div>
-                      </div>
-                      {ex.actual && (
-                        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", maxWidth: 90, textAlign: "right" }}>
-                          {ex.actual}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {s.status === "today" && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Progress</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: accent }}>{doneCt}/{s.exercises.length}</span>
-                      </div>
-                      <ProgressBar value={doneCt} max={s.exercises.length} color={accent} glow />
-                    </div>
-                  )}
+              {/* Progress bar for done/today */}
+              {selectedSession.exercises.length > 0 && (selectedSession.status === "done" || selectedSession.status === "today") && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Exercises</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: typeColor(selectedSession.type) }}>
+                      {selectedSession.exercises.filter(e => e.done).length}/{selectedSession.exercises.length}
+                    </span>
+                  </div>
+                  <ProgressBar
+                    value={selectedSession.exercises.filter(e => e.done).length}
+                    max={selectedSession.exercises.length}
+                    color={selectedSession.status === "today" ? accent : "#00C896"}
+                    glow={selectedSession.status === "today"}
+                  />
                 </div>
               )}
             </div>
-          );
-        })}
+
+            {/* Exercise list */}
+            {selectedSession.exercises.length > 0 ? (
+              <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, overflow: "hidden" }}>
+                {selectedSession.exercises.map((ex, ei) => (
+                  <div key={ei}
+                    onClick={() => { if (selectedSession.status === "today") toggleExercise(selectedIdx, ei); }}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "13px 16px",
+                      borderBottom: ei < selectedSession.exercises.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                      cursor: selectedSession.status === "today" ? "pointer" : "default",
+                    }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {/* Checkbox or status icon */}
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 8, flexShrink: 0,
+                        border: selectedSession.status === "today" && !ex.done ? `1.5px solid rgba(255,255,255,0.2)` : "none",
+                        background: ex.done ? (selectedSession.status === "today" ? accent : "rgba(0,200,150,0.25)") :
+                          selectedSession.status === "missed" ? "rgba(255,77,0,0.1)" : "rgba(255,255,255,0.04)",
+                        display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s",
+                      }}>
+                        {ex.done && <span style={{ fontSize: 11, color: selectedSession.status === "today" ? "#fff" : "#00C896" }}>✓</span>}
+                        {!ex.done && selectedSession.status === "missed" && <span style={{ fontSize: 10, color: "#FF4D0060" }}>✗</span>}
+                      </div>
+                      <div>
+                        <div style={{
+                          fontSize: 14, fontWeight: 600,
+                          color: ex.done ? "rgba(255,255,255,0.4)" : "#fff",
+                          textDecoration: ex.done && selectedSession.status === "today" ? "line-through" : "none",
+                        }}>{ex.name}</div>
+                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>{ex.sets} · {ex.weight}</div>
+                      </div>
+                    </div>
+                    {ex.actual && (
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", maxWidth: 100, textAlign: "right" }}>
+                        {ex.actual}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "24px 0", color: "rgba(255,255,255,0.25)", fontSize: 13 }}>
+                Rest day — recovery is progress 💤
+              </div>
+            )}
+
+            {/* Go to Today button if viewing a different day */}
+            {selectedSession.status !== "today" && todayDay && (
+              <button onClick={() => setActiveDay(todayDay)} style={{
+                marginTop: 12, width: "100%", background: `${accent}15`, border: `1px solid ${accent}40`,
+                borderRadius: 12, padding: "10px", color: accent, fontSize: 13, fontWeight: 700,
+                cursor: "pointer", fontFamily: "inherit",
+              }}>
+                ↩ Back to Today
+              </button>
+            )}
+          </div>
+        ) : (
+          /* No day selected — show summary rows */
+          <div style={{ padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {sessions.map((s, si) => (
+              <div key={si} onClick={() => setActiveDay(s.day)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
+                  borderRadius: 14, cursor: "pointer",
+                }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                  background: `${typeColor(s.type)}18`, border: `1px solid ${typeColor(s.type)}30`,
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
+                }}>
+                  {s.status === "done" ? "✓" : s.status === "missed" ? "✗" : s.type === "strength" ? "💪" : s.type === "cardio" ? "🏃" : "😴"}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{s.day} · {s.label}</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>{typeLabel(s.type)}</div>
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 8,
+                  background: `${statusColor(s.status)}18`, color: statusColor(s.status),
+                }}>
+                  {statusLabel(s.status)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </>
     );
   }
@@ -1289,7 +1358,13 @@ export default function App() {
 
         <div style={S.tabBar}>
           {tabs.map(t => (
-            <div key={t.id} style={S.tab(view === t.id)} onClick={() => setView(t.id)}>
+            <div key={t.id} style={S.tab(view === t.id)} onClick={() => {
+              setView(t.id);
+              if (t.id === "week" && !activeDay) {
+                const todayDay = sessions.find(s => s.status === "today")?.day;
+                if (todayDay) setActiveDay(todayDay);
+              }
+            }}>
               <span style={{ fontSize: 20 }}>{t.icon}</span>
               <span>{t.label}</span>
               {view === t.id && (
