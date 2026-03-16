@@ -133,37 +133,41 @@ export default function App() {
   const todaySession = sessions.find(s => s.status === "today");
   const todayIdx = sessions.findIndex(s => s.status === "today");
 
-  // ── Fetch client profile from Supabase ────────────────────────────────────
+  // ── Fetch client profile from Supabase + real-time week updates ──────────
+  function applyClientRow(data) {
+    setClientData(prev => ({
+      ...prev,
+      name: data.name,
+      avatar: data.avatar,
+      goal: data.goal,
+      phase: data.phase,
+      accent: data.accent_color || CLIENT.accent,
+      watch: data.watch || prev.watch,
+      connected: data.connected ?? prev.connected,
+      weight: data.weight ?? prev.weight,
+      startWeight: data.start_weight ?? prev.startWeight,
+      targetWeight: data.target_weight ?? prev.targetWeight,
+      bodyFat: data.body_fat ?? prev.bodyFat,
+      startBodyFat: data.start_body_fat ?? prev.startBodyFat,
+      targetBodyFat: data.target_body_fat ?? prev.targetBodyFat,
+      weekNum: data.week_num ?? prev.weekNum,
+      totalWeeks: data.total_weeks ?? prev.totalWeeks,
+      compliance: data.compliance ?? prev.compliance,
+      streak: data.streak ?? prev.streak,
+    }));
+  }
+
   useEffect(() => {
-    supabase
-      .from("clients")
-      .select("*")
-      .eq("thread_id", THREAD_ID)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          setClientData({
-            ...CLIENT,
-            name: data.name,
-            avatar: data.avatar,
-            goal: data.goal,
-            phase: data.phase,
-            accent: data.accent_color || CLIENT.accent,
-            watch: data.watch || clientData.watch,
-            connected: data.connected ?? clientData.connected,
-            weight: data.weight ?? CLIENT.weight,
-            startWeight: data.start_weight ?? clientData.startWeight,
-            targetWeight: data.target_weight ?? clientData.targetWeight,
-            bodyFat: data.body_fat ?? clientData.bodyFat,
-            startBodyFat: data.start_body_fat ?? clientData.startBodyFat,
-            targetBodyFat: data.target_body_fat ?? clientData.targetBodyFat,
-            weekNum: data.week_num ?? clientData.weekNum,
-            totalWeeks: data.total_weeks ?? clientData.totalWeeks,
-            compliance: data.compliance ?? clientData.compliance,
-            streak: data.streak ?? clientData.streak,
-          });
-        }
-      });
+    supabase.from("clients").select("*").eq("thread_id", THREAD_ID).single()
+      .then(({ data }) => { if (data) applyClientRow(data); });
+
+    const channel = supabase
+      .channel("client-profile-realtime")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "clients", filter: `thread_id=eq.${THREAD_ID}` },
+        (payload) => { if (payload.new) applyClientRow(payload.new); })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
   }, []);
 
   // ── Live watch tick ────────────────────────────────────────────────────────
@@ -577,8 +581,10 @@ export default function App() {
         <div style={S.header}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 500, letterSpacing: 0.3 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 500, letterSpacing: 0.3 }}>
+                <button onClick={() => setClientData(p => ({ ...p, weekNum: Math.max(1, p.weekNum - 1) }))} style={{ background: "none", border: "none", color: clientData.weekNum <= 1 ? "rgba(255,255,255,0.15)" : accent, fontSize: 18, padding: 0, lineHeight: 1, cursor: "pointer" }}>‹</button>
                 WEEK {clientData.weekNum} OF {clientData.totalWeeks} · {clientData.phase.toUpperCase()}
+                <button onClick={() => setClientData(p => ({ ...p, weekNum: Math.min(p.totalWeeks, p.weekNum + 1) }))} style={{ background: "none", border: "none", color: clientData.weekNum >= clientData.totalWeeks ? "rgba(255,255,255,0.15)" : accent, fontSize: 18, padding: 0, lineHeight: 1, cursor: "pointer" }}>›</button>
               </div>
               <div style={{ fontSize: 26, fontWeight: 800, color: "#fff", marginTop: 2, letterSpacing: -0.5 }}>
                 Good morning,<br />{clientData.name.split(' ')[0]} 👋
