@@ -124,7 +124,7 @@ export default function App() {
   const [foodPhotos, setFoodPhotos] = useState([]);
   const [photoUploading, setPhotoUploading] = useState(false);
   const fileInputRef = useRef(null);
-  const [progressPhotos, setProgressPhotos] = useState({ front: null, left: null, back: null, right: null });
+  const [progressPhotos, setProgressPhotos] = useState([]);
   const [progressUploading, setProgressUploading] = useState({ front: false, left: false, back: false, right: false });
   const progressFileInputRef = useRef(null);
   const [selectedProgressAngle, setSelectedProgressAngle] = useState(null);
@@ -216,25 +216,22 @@ export default function App() {
     };
   }, []);
 
-  // ── Progress photos: fetch latest per angle on mount ──────────────────────
+  // ── Progress photos: fetch all + real-time inserts ────────────────────────
   useEffect(() => {
-    async function fetchProgressPhotos() {
-      const { data, error } = await supabase
-        .from("progress_photos")
-        .select("*")
-        .eq("thread_id", THREAD_ID)
-        .order("created_at", { ascending: false });
-      if (!error && data) {
-        const grouped = { front: null, left: null, back: null, right: null };
-        for (const row of data) {
-          if (grouped[row.angle] === null) {
-            grouped[row.angle] = row;
-          }
-        }
-        setProgressPhotos(grouped);
-      }
-    }
-    fetchProgressPhotos();
+    supabase
+      .from("progress_photos")
+      .select("*")
+      .eq("thread_id", THREAD_ID)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => { if (!error && data) setProgressPhotos(data); });
+
+    const channel = supabase
+      .channel("progress-photos-client")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "progress_photos", filter: `thread_id=eq.${THREAD_ID}` },
+        (payload) => setProgressPhotos(prev => [payload.new, ...prev]))
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
   }, []);
 
   // ── Food photos: fetch last 5 on mount ────────────────────────────────────
@@ -433,7 +430,7 @@ export default function App() {
         return;
       }
 
-      setProgressPhotos(prev => ({ ...prev, [angle]: logRow }));
+      setProgressPhotos(prev => [logRow, ...prev]);
       notify("Progress photo saved!");
     } catch (err) {
       console.error("uploadProgressPhoto unexpected error:", err);
@@ -1018,31 +1015,8 @@ export default function App() {
     const overallPct = Math.round(((clientData.startWeight - clientData.weight) / (clientData.startWeight - clientData.targetWeight)) * 100);
     const bfLost = clientData.startBodyFat - clientData.bodyFat;
 
-    const angles = [
-      { key: "front", label: "Front" },
-      { key: "back", label: "Back" },
-      { key: "left", label: "Left" },
-      { key: "right", label: "Right" },
-    ];
-
-    const latestPhotoDate = Object.values(progressPhotos)
-      .filter(Boolean)
-      .map(p => p.logged_date)
-      .sort()
-      .reverse()[0] ?? null;
-
     return (
       <>
-        {/* Hidden file input for progress photo upload */}
-        <input
-          ref={progressFileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          style={{ display: "none" }}
-          onChange={handleProgressFileSelect}
-        />
-
         <div style={S.header}>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
             Week {clientData.weekNum} of {clientData.totalWeeks}
@@ -1054,86 +1028,6 @@ export default function App() {
               padding: "6px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
             }}>+ Log</button>
           </div>
-        </div>
-
-        {/* Progress Photos card */}
-        <div style={S.card}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Progress Photos</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {angles.map(({ key, label }) => {
-              const photo = progressPhotos[key];
-              const uploading = progressUploading[key];
-              return (
-                <div
-                  key={key}
-                  onClick={() => {
-                    if (!photo && !uploading) {
-                      setSelectedProgressAngle(key);
-                      progressFileInputRef.current?.click();
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    aspectRatio: "1 / 1",
-                    borderRadius: 12,
-                    overflow: "hidden",
-                    position: "relative",
-                    cursor: photo || uploading ? "default" : "pointer",
-                    border: photo ? "none" : `1.5px dashed ${accent}66`,
-                    background: photo ? "transparent" : `${accent}0A`,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {photo ? (
-                    <>
-                      <img
-                        src={photo.public_url}
-                        alt={label}
-                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                      />
-                      <div style={{
-                        position: "absolute", bottom: 0, left: 0, right: 0,
-                        background: "rgba(0,0,0,0.55)",
-                        padding: "4px 6px",
-                        textAlign: "center",
-                        fontSize: 10, fontWeight: 700, color: "#fff",
-                        textTransform: "uppercase", letterSpacing: 0.5,
-                      }}>
-                        {label}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 22, color: accent, fontWeight: 300, lineHeight: 1 }}>+</div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: accent, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                        {label}
-                      </div>
-                    </>
-                  )}
-
-                  {/* Loading overlay */}
-                  {uploading && (
-                    <div style={{
-                      position: "absolute", inset: 0,
-                      background: "rgba(0,0,0,0.6)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      borderRadius: 12,
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: accent }}>Uploading…</div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {latestPhotoDate && (
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 10 }}>
-              Latest photo: {latestPhotoDate}
-            </div>
-          )}
         </div>
 
         <div style={S.card}>
@@ -1375,10 +1269,151 @@ export default function App() {
     );
   }
 
+  function PhotosView() {
+    const ANGLES = ["front", "back", "left", "right"];
+
+    // Latest photo per angle
+    const latestByAngle = (angle) => progressPhotos.find(p => p.angle === angle) || null;
+
+    // All photos grouped by date (newest first)
+    const dateGroups = progressPhotos.reduce((acc, p) => {
+      const date = p.logged_date || p.created_at?.split("T")[0] || "Unknown";
+      if (!acc[date]) acc[date] = [];
+      acc[date].push(p);
+      return acc;
+    }, {});
+    const sortedDates = Object.keys(dateGroups).sort((a, b) => b.localeCompare(a));
+
+    return (
+      <>
+        {/* Hidden file input */}
+        <input
+          ref={progressFileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: "none" }}
+          onChange={handleProgressFileSelect}
+        />
+
+        <div style={S.header}>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" }}>
+            Week {clientData.weekNum} of {clientData.totalWeeks}
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 2 }}>Photos</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>
+            {progressPhotos.length > 0 ? `${progressPhotos.length} photo${progressPhotos.length > 1 ? "s" : ""} logged` : "Tap an angle to upload your first set"}
+          </div>
+        </div>
+
+        {/* Upload grid — latest snapshot per angle */}
+        <div style={{ padding: "0 16px 8px" }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>
+            Latest Snapshot
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {ANGLES.map(angle => {
+              const photo = latestByAngle(angle);
+              const uploading = progressUploading[angle];
+              return (
+                <div key={angle} onClick={() => {
+                  setSelectedProgressAngle(angle);
+                  progressFileInputRef.current?.click();
+                }} style={{
+                  aspectRatio: "1/1", borderRadius: 14, overflow: "hidden", position: "relative",
+                  cursor: "pointer",
+                  border: photo ? "none" : `1.5px dashed ${accent}55`,
+                  background: photo ? "transparent" : `${accent}08`,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                }}>
+                  {photo?.public_url ? (
+                    <>
+                      <img src={photo.public_url} alt={angle} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} />
+                      <div style={{
+                        position: "absolute", inset: 0, background: "transparent",
+                        display: "flex", flexDirection: "column", justifyContent: "space-between",
+                        padding: "8px",
+                      }}>
+                        <div style={{ alignSelf: "flex-end", background: "rgba(0,0,0,0.5)", borderRadius: 8, padding: "3px 8px", fontSize: 10, color: "rgba(255,255,255,0.8)" }}>
+                          Update
+                        </div>
+                        <div style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.75))", margin: "-8px", padding: "20px 8px 8px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: 0.5 }}>{angle}</span>
+                          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>{photo.logged_date}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 26, color: accent, opacity: 0.6, marginBottom: 4 }}>+</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>{angle}</div>
+                    </>
+                  )}
+                  {uploading && (
+                    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: accent }}>Uploading…</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* History grouped by date */}
+        {sortedDates.length > 0 && (
+          <div style={{ padding: "16px 16px 40px", display: "flex", flexDirection: "column", gap: 20 }}>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>
+              History
+            </div>
+            {sortedDates.map(date => (
+              <div key={date}>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontWeight: 600, marginBottom: 8 }}>{date}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
+                  {ANGLES.map(angle => {
+                    const photo = dateGroups[date].find(p => p.angle === angle);
+                    return (
+                      <div key={angle} style={{
+                        aspectRatio: "1/1", borderRadius: 10, overflow: "hidden", position: "relative",
+                        background: "rgba(255,255,255,0.04)",
+                        border: photo ? "1px solid rgba(255,255,255,0.1)" : "1px dashed rgba(255,255,255,0.08)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {photo?.public_url ? (
+                          <>
+                            <img src={photo.public_url} alt={angle} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} />
+                            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.7))", padding: "6px 4px 3px", textAlign: "center" }}>
+                              <span style={{ fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,0.85)", textTransform: "uppercase" }}>{angle}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.15)", textTransform: "uppercase" }}>{angle[0]}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {progressPhotos.length === 0 && (
+          <div style={{ margin: "12px 16px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "32px 20px", textAlign: "center" }}>
+            <div style={{ fontSize: 36, opacity: 0.2, marginBottom: 8 }}>📸</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.3)" }}>Tap any angle above to log your first photos</div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   const tabs = [
     { id: "today", label: "Today", icon: "🏠" },
     { id: "week", label: "Week", icon: "📅" },
     { id: "progress", label: "Progress", icon: "📈" },
+    { id: "photos", label: "Photos", icon: "📸" },
     { id: "coach", label: "Coach", icon: "💬" },
     { id: "billing", label: "Billing", icon: "💳", badge: invoices.some(i => i.status === "pending") },
   ];
@@ -1456,6 +1491,7 @@ export default function App() {
           {view === "today" && <TodayView />}
           {view === "week" && <WeekView />}
           {view === "progress" && <ProgressView />}
+          {view === "photos" && <PhotosView />}
           {view === "coach" && <CoachView />}
           {view === "billing" && <BillingView />}
         </div>
