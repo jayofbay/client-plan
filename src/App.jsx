@@ -1,5 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./lib/supabase";
+import {
+  FOOD_PHOTOS_BUCKET,
+  PROGRESS_PHOTOS_BUCKET,
+  buildFoodPhotoPath,
+  buildProgressPhotoPath,
+  enrichPhotosWithDisplayUrls,
+  resolvePhotoUrl,
+  uploadPhotoToStorage,
+} from "./lib/photos";
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
 
@@ -218,17 +227,35 @@ export default function App() {
 
   // ── Progress photos: fetch all + real-time inserts ────────────────────────
   useEffect(() => {
-    supabase
-      .from("progress_photos")
-      .select("*")
-      .eq("thread_id", THREAD_ID)
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => { if (!error && data) setProgressPhotos(data); });
+    async function fetchProgressPhotos() {
+      const { data, error } = await supabase
+        .from("progress_photos")
+        .select("*")
+        .eq("thread_id", THREAD_ID)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("progress_photos fetch error:", error);
+        return;
+      }
+
+      if (data) {
+        setProgressPhotos(await enrichPhotosWithDisplayUrls(data, PROGRESS_PHOTOS_BUCKET));
+      }
+    }
+    fetchProgressPhotos();
 
     const channel = supabase
       .channel("progress-photos-client")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "progress_photos", filter: `thread_id=eq.${THREAD_ID}` },
-        (payload) => setProgressPhotos(prev => [payload.new, ...prev]))
+        async (payload) => {
+          const displayUrl = await resolvePhotoUrl(PROGRESS_PHOTOS_BUCKET, payload.new);
+          const enriched = { ...payload.new, display_url: displayUrl };
+          setProgressPhotos(prev => {
+            if (prev.some(p => p.id === enriched.id)) return prev;
+            return [enriched, ...prev];
+          });
+        })
       .subscribe();
 
     return () => supabase.removeChannel(channel);
@@ -243,8 +270,14 @@ export default function App() {
         .eq("thread_id", THREAD_ID)
         .order("created_at", { ascending: false })
         .limit(5);
-      if (!error && data) {
-        setFoodPhotos(data);
+
+      if (error) {
+        console.error("food_photo_logs fetch error:", error);
+        return;
+      }
+
+      if (data) {
+        setFoodPhotos(await enrichPhotosWithDisplayUrls(data, FOOD_PHOTOS_BUCKET));
       }
     }
     fetchFoodPhotos();
@@ -393,24 +426,8 @@ export default function App() {
     setProgressUploading(prev => ({ ...prev, [angle]: true }));
     try {
       const today = new Date().toISOString().split("T")[0];
-      const uuid = crypto.randomUUID();
-      const ext = file.name.split(".").pop() || "jpg";
-      const storagePath = `jordan-blake/progress/${today}/${angle}-${uuid}.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("progress-photos")
-        .upload(storagePath, file, { contentType: file.type, upsert: false });
-
-      if (uploadError) {
-        console.error("progress photo upload error:", uploadError);
-        notify("Progress photo upload failed", "error");
-        return;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from("progress-photos")
-        .getPublicUrl(storagePath);
-      const publicUrl = urlData?.publicUrl ?? "";
+      const storagePath = buildProgressPhotoPath(THREAD_ID, angle, file);
+      const publicUrl = await uploadPhotoToStorage(PROGRESS_PHOTOS_BUCKET, storagePath, file);
 
       const { data: logRow, error: insertError } = await supabase
         .from("progress_photos")
@@ -426,15 +443,19 @@ export default function App() {
 
       if (insertError) {
         console.error("progress_photos insert error:", insertError);
-        notify("Photo saved but log failed", "error");
+        notify(`Photo saved but log failed: ${insertError.message}`, "error");
         return;
       }
 
-      setProgressPhotos(prev => [logRow, ...prev]);
+      const displayUrl = await resolvePhotoUrl(PROGRESS_PHOTOS_BUCKET, logRow);
+      setProgressPhotos(prev => {
+        if (prev.some(p => p.id === logRow.id)) return prev;
+        return [{ ...logRow, display_url: displayUrl }, ...prev];
+      });
       notify("Progress photo saved!");
     } catch (err) {
       console.error("uploadProgressPhoto unexpected error:", err);
-      notify("Unexpected error uploading photo", "error");
+      notify(err?.message || "Unexpected error uploading photo", "error");
     } finally {
       setProgressUploading(prev => ({ ...prev, [angle]: false }));
     }
@@ -458,28 +479,9 @@ export default function App() {
     setPhotoUploading(true);
     try {
       const today = new Date().toISOString().split("T")[0];
-      const uuid = crypto.randomUUID();
-      const ext = file.name.split(".").pop() || "jpg";
-      const storagePath = `jordan-blake/${today}/${uuid}.${ext}`;
+      const storagePath = buildFoodPhotoPath(THREAD_ID, file);
+      const publicUrl = await uploadPhotoToStorage(FOOD_PHOTOS_BUCKET, storagePath, file);
 
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("food-photos")
-        .upload(storagePath, file, { contentType: file.type, upsert: false });
-
-      if (uploadError) {
-        console.error("storage upload error:", uploadError);
-        notify("Photo upload failed", "error");
-        return;
-      }
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("food-photos")
-        .getPublicUrl(storagePath);
-      const publicUrl = urlData?.publicUrl ?? "";
-
-      // Insert row to food_photo_logs
       const { data: logRow, error: insertError } = await supabase
         .from("food_photo_logs")
         .insert({
@@ -496,16 +498,16 @@ export default function App() {
 
       if (insertError) {
         console.error("food_photo_logs insert error:", insertError);
-        notify("Photo saved to storage but log failed", "error");
+        notify(`Photo saved to storage but log failed: ${insertError.message}`, "error");
         return;
       }
 
-      // Prepend to local state (keep last 5)
-      setFoodPhotos(prev => [logRow, ...prev].slice(0, 5));
+      const displayUrl = await resolvePhotoUrl(FOOD_PHOTOS_BUCKET, logRow);
+      setFoodPhotos(prev => [{ ...logRow, display_url: displayUrl }, ...prev].slice(0, 5));
       notify("Food photo logged!");
     } catch (err) {
       console.error("handleFoodPhotoSelect unexpected error:", err);
-      notify("Unexpected error uploading photo", "error");
+      notify(err?.message || "Unexpected error uploading photo", "error");
     } finally {
       setPhotoUploading(false);
     }
@@ -734,28 +736,28 @@ export default function App() {
                 </div>
               ))}
             </div>
-
-            {/* Food photo button below live stats card */}
-            <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={photoUploading}
-                style={{
-                  width: "100%", background: photoUploading ? "rgba(255,255,255,0.04)" : "rgba(255,77,0,0.12)",
-                  border: `1px solid ${photoUploading ? "rgba(255,255,255,0.08)" : `${accent}44`}`,
-                  borderRadius: 12, padding: "10px 14px",
-                  color: photoUploading ? "rgba(255,255,255,0.35)" : accent,
-                  fontSize: 13, fontWeight: 700, cursor: photoUploading ? "not-allowed" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  fontFamily: "inherit", transition: "all 0.2s",
-                }}
-              >
-                <span style={{ fontSize: 16 }}>📷</span>
-                {photoUploading ? "Uploading..." : "+ Photo  Log Food"}
-              </button>
-            </div>
           </div>
         )}
+
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 10 }}>Food Photo Log</div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={photoUploading}
+            style={{
+              width: "100%", background: photoUploading ? "rgba(255,255,255,0.04)" : "rgba(255,77,0,0.12)",
+              border: `1px solid ${photoUploading ? "rgba(255,255,255,0.08)" : `${accent}44`}`,
+              borderRadius: 12, padding: "10px 14px",
+              color: photoUploading ? "rgba(255,255,255,0.35)" : accent,
+              fontSize: 13, fontWeight: 700, cursor: photoUploading ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              fontFamily: "inherit", transition: "all 0.2s",
+            }}
+          >
+            <span style={{ fontSize: 16 }}>📷</span>
+            {photoUploading ? "Uploading..." : "+ Photo Log Food"}
+          </button>
+        </div>
 
         {/* Food Log section */}
         {foodPhotos.length > 0 && (
@@ -765,7 +767,7 @@ export default function App() {
               {foodPhotos.map((photo, i) => (
                 <div key={photo.id ?? i} style={{ flexShrink: 0, position: "relative" }}>
                   <img
-                    src={photo.public_url}
+                    src={photo.display_url || photo.public_url}
                     alt={photo.caption || `Food ${i + 1}`}
                     style={{
                       width: 72, height: 72, borderRadius: 12,
@@ -1326,9 +1328,9 @@ export default function App() {
                   background: photo ? "transparent" : `${accent}08`,
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                 }}>
-                  {photo?.public_url ? (
+                  {photo?.display_url || photo?.public_url ? (
                     <>
-                      <img src={photo.public_url} alt={angle} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} />
+                      <img src={photo.display_url || photo.public_url} alt={angle} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} />
                       <div style={{
                         position: "absolute", inset: 0, background: "transparent",
                         display: "flex", flexDirection: "column", justifyContent: "space-between",
@@ -1379,9 +1381,9 @@ export default function App() {
                         border: photo ? "1px solid rgba(255,255,255,0.1)" : "1px dashed rgba(255,255,255,0.08)",
                         display: "flex", alignItems: "center", justifyContent: "center",
                       }}>
-                        {photo?.public_url ? (
+                        {photo?.display_url || photo?.public_url ? (
                           <>
-                            <img src={photo.public_url} alt={angle} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} />
+                            <img src={photo.display_url || photo.public_url} alt={angle} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} />
                             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.7))", padding: "6px 4px 3px", textAlign: "center" }}>
                               <span style={{ fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,0.85)", textTransform: "uppercase" }}>{angle}</span>
                             </div>
