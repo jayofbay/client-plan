@@ -6,8 +6,11 @@ import {
   buildFoodPhotoPath,
   buildProgressPhotoPath,
   enrichPhotosWithDisplayUrls,
+  formatUploadError,
+  preflightPhotoUpload,
   resolvePhotoUrl,
   uploadPhotoToStorage,
+  validatePhotoFile,
 } from "./lib/photos";
 
 // ─── DATA ────────────────────────────────────────────────────────────────────
@@ -425,6 +428,9 @@ export default function App() {
   async function uploadProgressPhoto(angle, file) {
     setProgressUploading(prev => ({ ...prev, [angle]: true }));
     try {
+      validatePhotoFile(file);
+      await preflightPhotoUpload(PROGRESS_PHOTOS_BUCKET, "progress_photos");
+
       const today = new Date().toISOString().split("T")[0];
       const storagePath = buildProgressPhotoPath(THREAD_ID, angle, file);
       const publicUrl = await uploadPhotoToStorage(PROGRESS_PHOTOS_BUCKET, storagePath, file);
@@ -443,7 +449,7 @@ export default function App() {
 
       if (insertError) {
         console.error("progress_photos insert error:", insertError);
-        notify(`Photo saved but log failed: ${insertError.message}`, "error");
+        notify(formatUploadError(insertError, "log"), "error");
         return;
       }
 
@@ -455,7 +461,7 @@ export default function App() {
       notify("Progress photo saved!");
     } catch (err) {
       console.error("uploadProgressPhoto unexpected error:", err);
-      notify(err?.message || "Unexpected error uploading photo", "error");
+      notify(formatUploadError(err, "upload"), "error");
     } finally {
       setProgressUploading(prev => ({ ...prev, [angle]: false }));
     }
@@ -478,6 +484,9 @@ export default function App() {
 
     setPhotoUploading(true);
     try {
+      validatePhotoFile(file);
+      await preflightPhotoUpload(FOOD_PHOTOS_BUCKET, "food_photo_logs");
+
       const today = new Date().toISOString().split("T")[0];
       const storagePath = buildFoodPhotoPath(THREAD_ID, file);
       const publicUrl = await uploadPhotoToStorage(FOOD_PHOTOS_BUCKET, storagePath, file);
@@ -498,7 +507,7 @@ export default function App() {
 
       if (insertError) {
         console.error("food_photo_logs insert error:", insertError);
-        notify(`Photo saved to storage but log failed: ${insertError.message}`, "error");
+        notify(formatUploadError(insertError, "log"), "error");
         return;
       }
 
@@ -507,7 +516,7 @@ export default function App() {
       notify("Food photo logged!");
     } catch (err) {
       console.error("handleFoodPhotoSelect unexpected error:", err);
-      notify(err?.message || "Unexpected error uploading photo", "error");
+      notify(formatUploadError(err, "upload"), "error");
     } finally {
       setPhotoUploading(false);
     }
